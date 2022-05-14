@@ -37,6 +37,18 @@ def decompose_message(message):
     return operation
 
 
+# function to perform required operation
+def perform_operation(operation):
+    if operation == "GET":
+        pass
+    elif operation == "PUT":
+        pass
+    elif operation == "CLR":
+        pass
+    elif operation == "ADD":
+        pass
+
+
 def main():
     global HOST
     global SELF_PORT
@@ -62,10 +74,15 @@ def main():
             conn, clientAddress = proxyServerSocket.accept()
             print("Connected by", clientAddress)
             sleep(0.5)
+            continue
         if dataReceived:
-            print("\nReceived data: {0}".format(dataReceived))
-            dataReceived = dataReceived.decode("utf-8")
-            print("Decoded data is: {0}".format(dataReceived))
+            try:
+                dataReceived = dataReceived.decode("utf-8")
+            except:
+                print("Error occured while decoding the message")
+                continue
+            print("\nReceived message from client: {0}".format(dataReceived))
+            operation = decompose_message(dataReceived)
 
 
 if __name__ == "__main__":
