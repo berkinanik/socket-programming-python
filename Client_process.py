@@ -6,10 +6,26 @@ from time import sleep
 # define global variables
 specifiedIndices = list()
 specifiedData = list()
+responseIndices = list()
+responseData = list()
 message = ""
+responseMessage = ""
 # socket variables
 HOST = "127.0.0.1"
 PROXY_PORT = 8081
+# define the client socket
+try:
+    clientSocket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    print("Client socket created successfully\n")
+except:
+    print("Error occured while creating the client server socket")
+    exit(1)
+try:
+    clientSocket.connect((HOST, PROXY_PORT))
+    print("Connected to the proxy server at {0}:{1}\n".format(HOST, PROXY_PORT))
+except:
+    print("Error occured while connecting to the proxy server")
+    exit(1)
 
 
 # function for getting parameters required for the get or add operation
@@ -95,17 +111,82 @@ def prepare_message(operation):
 
 
 # function to send the message to the proxy server
-def send_message_to_proxy(socket):
+def send_message_to_proxy():
     global message
-    socket.send(message.encode())
+    global clientSocket
+    clientSocket.send(message.encode())
     print("Message sent to proxy server: {0}\n".format(message))
 
 
+# function to decompose the server response
+def decompose_message():
+    global responseMessage
+    global responseIndices
+    global responseData
+    # split the message into parts
+    operation = ""
+    messageParts = responseMessage.split(";")
+    try:
+        for mPart in messageParts:
+            key, value = mPart.split("=")
+            # extract the operation
+            if key == "OP":
+                operation = value
+            # extract the indices
+            elif key == "IND":
+                responseIndices = [int(i) for i in value.split(",")]
+            # extract the data
+            elif key == "DATA":
+                responseData = [int(i) for i in value.split(",")]
+            elif key == "CODE":
+                if int(value) == 404:
+                    raise Exception("Requested indices not found. Try again")
+                elif int(value) == 500:
+                    raise Exception("Server error. Try again")
+                elif int(value) == 200:
+                    pass
+    except:
+        raise Exception("Invalid message format")
+    return operation
+
+
+# function to print the server response
+def print_response(operation):
+    global responseIndices
+    global responseData
+    if operation == "GET":
+        print("Retrieved data (index, data): {0}".format([(i, d) for i, d in zip(responseIndices, responseData)]))
+    elif operation == "PUT":
+        pass
+    elif operation == "CLR":
+        pass
+    elif operation == "ADD":
+        pass
+
+
+# function to clear variables
+def clear_variables():
+    global specifiedIndices
+    global specifiedData
+    global responseIndices
+    global responseData
+    global message
+    global responseMessage
+    responseMessage = ""
+    message = ""
+    specifiedIndices = []
+    specifiedData = []
+    responseIndices = []
+    responseData = []
+
+
 # function for the client interface
-def client_interface(socket):
+def main():
     global message
     global specifiedData
     global specifiedIndices
+    global responseMessage
+    global clientSocket
     while 1:
         # first list available operations
         print("Available operations:")
@@ -148,34 +229,32 @@ def client_interface(socket):
                     pass
                 prepare_message(chosenOperation)
                 print("\nSending message to the server...")
-                send_message_to_proxy(socket)
-                sleep(2)
-                specifiedData = list()
-                specifiedIndices = list()
-                message = ""
+                send_message_to_proxy()
+                try:
+                    dataReceived = clientSocket.recv(1024)
+                except:
+                    print("\nError occurred while receiving data from the server.\n")
+                    print("Exiting...\n")
+                    exit(1)
+                if dataReceived:
+                    try:
+                        responseMessage = dataReceived.decode("utf-8")
+                    except:
+                        print("Error occured while decoding the message")
+                        continue
+                    print("\nReceived message from server: {0}".format(responseMessage))
+                    try:
+                        operation = decompose_message()
+                        print_response(operation)
+                    except Exception as e:
+                        print(e)
+                    clear_variables()
+                    print("\n")
+                    sleep(1)
             except Exception as e:
                 print(e)
                 sleep(1)
                 continue
-
-
-def main():
-    global HOST
-    global PROXY_PORT
-    # define the client socket
-    try:
-        clientSocket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        print("Client socket created successfully\n")
-    except:
-        print("Error occured while creating the client server socket")
-        exit(1)
-    try:
-        clientSocket.connect((HOST, PROXY_PORT))
-        print("Connected to the proxy server at {0}:{1}\n".format(HOST, PROXY_PORT))
-    except:
-        print("Error occured while connecting to the proxy server")
-        exit(1)
-    client_interface(clientSocket)
 
 
 if __name__ == "__main__":
