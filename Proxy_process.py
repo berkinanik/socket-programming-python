@@ -1,6 +1,5 @@
 # import necessary libraries
 import socket
-from time import sleep
 
 
 # define global variables
@@ -12,46 +11,60 @@ serverRequestIndices = list()
 serverRequestData = list()
 serverResponseIndices = list()
 serverResponseData = list()
+summationResult = 0
 clientMessage = ""
 serverMessage = ""
-serverResponse = ""
+serverResponseMessage = ""
 serverConnectionNeeded = False
 serverConnectionEstablished = False
 # socket variables
 HOST = "127.0.0.1"
 SELF_PORT = 8081
 SERVER_PORT = 8080
+# connect to backend server
 # define proxy server socket
 try:
     proxyServerSocket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    proxyServerSocket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    proxyServerSocket.bind((HOST, SELF_PORT))
-except:
-    print("Error occured while creating the proxy server socket")
+    print("Proxy - server socket created successfully\n")
+except Exception as e:
+    print(str(e))
+    print("Error occured while creating the proxy - server socket")
+    exit(1)
+try:
+    proxyServerSocket.connect((HOST, SERVER_PORT))
+    print("Connected to the backend server at {0}:{1}\n".format(HOST, SERVER_PORT))
+except Exception as e:
+    print(str(e))
+    print("Error occured while connecting to the backend server")
+    exit(1)
+# define proxy client socket
+try:
+    proxyClientSocket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    proxyClientSocket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    proxyClientSocket.bind((HOST, SELF_PORT))
+except Exception as e:
+    print(str(e))
+    print("Error occured while creating the client - proxy socket")
     exit(1)
 print("Proxy server is running on {0}:{1}\n".format(HOST, SELF_PORT))
 try:
-    proxyServerSocket.listen(1)
+    proxyClientSocket.listen(1)
     print("Listening for connections")
-except:
+except Exception as e:
+    print(str(e))
     print("Error occured while listening for connections")
     exit(1)
 try:
-    clientConnection, clientAddress = proxyServerSocket.accept()
+    clientConnection, clientAddress = proxyClientSocket.accept()
     print("Connected by", clientAddress)
-except:
+except Exception as e:
+    print(str(e))
     print("Error occured while accepting the connection")
     exit(1)
-# try:
-#     proxyServerSocket.connect((HOST, SERVER_PORT))
-#     print("Connected to the backend server at {0}:{1}\n".format(HOST, SERVER_PORT))
-# except:
-#     print("Error occured while connecting to the backend server")
-#     exit(1)
+
 # proxy server table
-proxyStorageIndices = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
-proxyStorageData = [11, 12, 13, 14, 15, 16, 17, 18, 19, 20]
-lastRetrieved = []
+proxyStorageIndices = []
+proxyStorageData = []
 
 # message format is:
 # OP=<operation>;IND=<index1>,<index2>...;DATA=<data1>,<data2>...
@@ -85,17 +98,24 @@ def decompose_message(message, isServerResponse=False):
                     serverResponseData = [int(i) for i in value.split(",")]
                 else:
                     requestData = [int(i) for i in value.split(",")]
-    except:
-        print("Error occured while decomposing the message")
-        raise Exception("500-Error occured while decomposing the message")
+            elif key == "CODE":
+                if int(value) == 404:
+                    raise Exception("404-Requested indices not found. Try again")
+                elif int(value) == 500:
+                    raise Exception("505-Server error. Try again")
+                elif int(value) == 200:
+                    pass
+    except Exception as e:
+        raise e
     return operation
 
 
 def send_message_to_client():
     global clientMessage
+    global clientConnection
     try:
         clientConnection.send(clientMessage.encode("utf-8"))
-        print("\nSent message to client: {0}".format(clientMessage))
+        print("Sent message to client: {0}".format(clientMessage))
     except:
         print("Error occured while sending message to client")
         raise Exception("500-Error occured while sending message to client")
@@ -103,11 +123,13 @@ def send_message_to_client():
 
 def send_message_to_server():
     global serverMessage
+    global proxyServerSocket
     try:
         proxyServerSocket.send(serverMessage.encode("utf-8"))
+        print("Sent message to server: {0}".format(serverMessage))
     except:
-        print("Error occured while sending message to client")
-        raise Exception("500-Error occured while sending message to server")
+        print("Error occured while sending message to backend server")
+        raise Exception("500-Error occured while sending message to backend server")
 
 
 def prepare_server_message(operation):
@@ -130,26 +152,21 @@ def prepare_client_message(operation):
     global clientMessage
     global responseIndices
     global responseData
+    global summationResult
     if operation == "GET":
         clientMessage = "OP=GET;IND={0};DATA={1};CODE=200".format(
             ",".join(str(i) for i in responseIndices), ",".join(str(i) for i in responseData)
         )
     elif operation == "PUT":
-        pass
+        clientMessage = "OP=PUT;IND={0};DATA={1};CODE=200".format(
+            ",".join(str(i) for i in serverResponseIndices), ",".join(str(i) for i in serverResponseData)
+        )
     elif operation == "CLR":
         clientMessage = "OP=CLR;CODE=200"
     elif operation == "ADD":
-        pass
-
-
-# function to update last retrieved list
-def update_last_retrieved(index):
-    global lastRetrieved
-    if len(lastRetrieved) == 5:
-        lastRetrieved.pop(0)
-        lastRetrieved.append(index)
-    else:
-        lastRetrieved.append(index)
+        clientMessage = "OP=ADD;IND={0};DATA={1};CODE=200".format(
+            ",".join(str(i) for i in responseIndices), summationResult
+        )
 
 
 # function to perform required operation
@@ -162,41 +179,80 @@ def perform_operation(operation):
     global responseIndices
     global responseData
     global serverConnectionNeeded
+    global summationResult
     if operation == "GET":
         for index in requestIndices:
             if index in proxyStorageIndices:
                 responseIndices.append(index)
                 responseData.append(proxyStorageData[proxyStorageIndices.index(index)])
-                update_last_retrieved(index)
             else:
                 serverConnectionNeeded = True
                 serverRequestIndices.append(index)
     elif operation == "PUT":
         serverConnectionNeeded = True
+        proxyTableUpdated = False
         # update the proxy table for existing indices
         for index in requestIndices:
             if index in proxyStorageIndices:
                 proxyStorageData[proxyStorageIndices.index(index)] = requestData[requestIndices.index(index)]
-                update_last_retrieved(index)
+                proxyTableUpdated = True
             serverRequestIndices.append(index)
             serverRequestData.append(requestData[requestIndices.index(index)])
+        if proxyTableUpdated:
+            print_proxy_table()
     elif operation == "CLR":
         serverConnectionNeeded = True
         # clear the proxy table
         proxyStorageData = []
         proxyStorageIndices = []
         lastUpdated = []
+        print("Proxy table cleared\n")
     elif operation == "ADD":
-        serverConnectionNeeded = True
+        summation = 0
         for index in requestIndices:
-            serverRequestIndices.append(index)
+            if index in proxyStorageIndices:
+                summation += proxyStorageData[proxyStorageIndices.index(index)]
+            else:
+                serverConnectionNeeded = True
+                break
+        if serverConnectionNeeded:
+            for index in requestIndices:
+                serverRequestIndices.append(index)
+        else:
+            summationResult = summation
+            responseIndices = requestIndices
+
+
+def perform_server_response_operation(operation):
+    global proxyStorageIndices
+    global proxyStorageData
+    global lastUpdated
+    global serverResponseIndices
+    global serverResponseData
+    global summationResult
+    global responseIndices
+    global responseData
+    if operation == "GET":
+        for index in serverResponseIndices:
+            responseIndices.append(index)
+            responseData.append(serverResponseData[serverResponseIndices.index(index)])
+            if len(proxyStorageData) == 5:
+                proxyStorageIndices.pop(0)
+                proxyStorageData.pop(0)
+            proxyStorageIndices.append(index)
+            proxyStorageData.append(serverResponseData[serverResponseIndices.index(index)])
+        print_proxy_table()
+    elif operation == "ADD":
+        summationResult = serverResponseData[0]
+        responseIndices = serverResponseIndices
 
 
 # function to print proxy table
 def print_proxy_table():
     print("\nChanges made to the proxy table:")
+    print("Index\tData")
     for i in range(len(proxyStorageIndices)):
-        print("{0} {1}".format(proxyStorageIndices[i], proxyStorageData[i]))
+        print("{0}\t{1}".format(proxyStorageIndices[i], proxyStorageData[i]))
     print("\n")
 
 
@@ -212,7 +268,7 @@ def clear_variables():
     global serverResponseData
     global clientMessage
     global serverMessage
-    global serverResponse
+    global serverResponseMessage
     global serverConnectionNeeded
     global serverConnectionEstablished
     requestIndices = []
@@ -225,66 +281,75 @@ def clear_variables():
     serverResponseData = []
     clientMessage = ""
     serverMessage = ""
-    serverResponse = ""
+    serverResponseMessage = ""
     serverConnectionNeeded = False
     serverConnectionEstablished = False
 
 
 def main():
-    global HOST
-    global SELF_PORT
-    global proxyServerSocket
+    global proxyClientSocket
     global clientConnection
     global clientAddress
     global serverConnectionNeeded
+    global clientMessage
     while True:
         try:
             dataReceived = clientConnection.recv(1024)
         except:
             print(clientAddress, "disconnected")
-            proxyServerSocket.listen(1)
-            clientConnection, clientAddress = proxyServerSocket.accept()
+            proxyClientSocket.listen(1)
+            clientConnection, clientAddress = proxyClientSocket.accept()
             print("Connected by", clientAddress)
-            sleep(0.5)
             continue
         if dataReceived:
             try:
                 dataReceived = dataReceived.decode("utf-8")
-            except Exception as e:
-                print(str(e))
+            except:
+                print("Error occured while decoding the message")
+                clientMessage = "CODE=500"
                 try:
-                    clientConnection.send("CODE=500".encode("utf-8"))
+                    send_message_to_client()
                 except:
                     pass
+                clear_variables()
                 continue
-            print("\nReceived message from client: {0}".format(dataReceived))
+            print("Received message from client: {0}".format(dataReceived))
             try:
                 operation = decompose_message(dataReceived)
                 perform_operation(operation)
                 if serverConnectionNeeded:
-                    # send message to server
-                    # wait for server response
-                    # decompose the message
-                    # update the proxy table
-                    # add the response indicies and data to the response indices and data
-                    pass
+                    prepare_server_message(operation)
+                    send_message_to_server()
+                    try:
+                        serverDataReceived = proxyServerSocket.recv(1024)
+                    except:
+                        print("Error occurred while receiving data from the backend server.\n")
+                        print("Exiting...\n")
+                        exit(1)
+                    if serverDataReceived:
+                        try:
+                            serverResponseMessage = serverDataReceived.decode("utf-8")
+                        except:
+                            print("Error occured while decoding the message")
+                            continue
+                        print("Received message from the backend server: {0}".format(serverResponseMessage))
+                        operation = decompose_message(serverResponseMessage, True)
+                        perform_server_response_operation(operation)
                 prepare_client_message(operation)
                 send_message_to_client()
-                clear_variables()
                 print("\n")
             except Exception as e:
                 print(str(e))
                 print("\n")
                 if "404" in str(e):
-                    try:
-                        clientConnection.send("CODE=404".encode("utf-8"))
-                    except:
-                        pass
+                    clientMessage = "CODE=404"
                 if "500" in str(e):
-                    try:
-                        clientConnection.send("CODE=500".encode("utf-8"))
-                    except:
-                        pass
+                    clientMessage = "CODE=500"
+                try:
+                    send_message_to_client()
+                except:
+                    pass
+            clear_variables()
 
 
 if __name__ == "__main__":

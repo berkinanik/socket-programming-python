@@ -17,13 +17,15 @@ PROXY_PORT = 8081
 try:
     clientSocket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     print("Client socket created successfully\n")
-except:
+except Exception as e:
+    print(str(e))
     print("Error occured while creating the client server socket")
     exit(1)
 try:
     clientSocket.connect((HOST, PROXY_PORT))
     print("Connected to the proxy server at {0}:{1}\n".format(HOST, PROXY_PORT))
-except:
+except Exception as e:
+    print(str(e))
     print("Error occured while connecting to the proxy server")
     exit(1)
 
@@ -145,8 +147,8 @@ def decompose_message():
                     raise Exception("Server error. Try again")
                 elif int(value) == 200:
                     pass
-    except:
-        raise Exception("Invalid message format")
+    except Exception as e:
+        raise e
     return operation
 
 
@@ -155,13 +157,18 @@ def print_response(operation):
     global responseIndices
     global responseData
     if operation == "GET":
-        print("Retrieved data (index, data): {0}".format([(i, d) for i, d in zip(responseIndices, responseData)]))
+        print("Retrieved data\nIndex\tData")
+        for i in range(len(responseIndices)):
+            print("{0}\t{1}".format(responseIndices[i], responseData[i]))
     elif operation == "PUT":
-        pass
+        print("Updated data\nIndex\tData")
+        for i in range(len(responseIndices)):
+            print("{0}\t{1}".format(responseIndices[i], responseData[i]))
     elif operation == "CLR":
-        pass
+        print("Cleared data")
     elif operation == "ADD":
-        pass
+        print("Added indexes: {0}".format(",".join(str(i) for i in responseIndices)))
+        print("Summation Result: {0}".format(responseData[0]))
 
 
 # function to clear variables
@@ -233,7 +240,7 @@ def main():
                 try:
                     dataReceived = clientSocket.recv(1024)
                 except:
-                    print("\nError occurred while receiving data from the server.\n")
+                    print("\nError occurred while receiving data from the proxy server.\n")
                     print("Exiting...\n")
                     exit(1)
                 if dataReceived:
@@ -242,12 +249,12 @@ def main():
                     except:
                         print("Error occured while decoding the message")
                         continue
-                    print("\nReceived message from server: {0}".format(responseMessage))
+                    print("\nReceived message from the proxy server: {0}".format(responseMessage))
                     try:
                         operation = decompose_message()
                         print_response(operation)
                     except Exception as e:
-                        print(e)
+                        print(str(e))
                     clear_variables()
                     print("\n")
                     sleep(1)
